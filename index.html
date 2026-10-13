@@ -14,7 +14,7 @@
 <title>國小寫字簿</title>
 <script>
 /* 自動更新：頁面載入後檢查 version.json，若有新版就換成帶版本參數的網址重新載入（避開瀏覽器快取） */
-var BUILD="20261013-6";
+var BUILD="20261013-9";
 (function(){try{
   fetch("version.json?t="+Date.now(),{cache:"no-store"}).then(function(r){return r.ok?r.json():null}).then(function(j){
     if(!j||!j.v||j.v===BUILD)return;
@@ -29,7 +29,7 @@ var BUILD="20261013-6";
     <h2>國小寫字簿</h2>
     <label for="gatePw" class="hint">請輸入密碼</label>
     <input id="gatePw" type="password" inputmode="numeric" autocomplete="current-password" autofocus>
-    <div class="hint">密碼提示：梧棲</div>
+    <div class="hint">請輸入您專屬的密碼（不分大小寫）</div>
     <div class="err" id="gateErr" aria-live="polite"></div>
     <button type="submit">進入</button>
     <aside class="notice" aria-label="使用聲明">
@@ -46,28 +46,38 @@ var BUILD="20261013-6";
 </div>
 <script>
 (function(){
-  var SALT=new Uint8Array("66a547e4d6c92b25a76f48b8784cfbbc".match(/../g).map(function(h){return parseInt(h,16)})),ITER=600000,DAYS=30;
-  var MAXF=5,LOCKMIN=10,FKEY="xz-fails";
+  var ITER=600000,DAYS=30,MAXF=5,LOCKMIN=10,FKEY="xz-fails";
   var gate=document.getElementById("gate"),form=document.getElementById("gateForm"),pw=document.getElementById("gatePw"),err=document.getElementById("gateErr"),btn=form.querySelector("button"),timer=null;
   var enc=new TextEncoder(),dec=new TextDecoder(),have=!!(window.crypto&&crypto.subtle);
+  var norm=function(s){return s.trim().toLowerCase().replace(/[\s-]/g,"")};
+  var h2u=function(h){return new Uint8Array(h.match(/../g).map(function(x){return parseInt(x,16)}))};
   /* ---- 金鑰記住（IndexedDB，非可匯出的 CryptoKey），30 天 ---- */
   function idb(){return new Promise(function(res,rej){try{var q=indexedDB.open("xz",1);q.onupgradeneeded=function(){q.result.createObjectStore("k")};q.onsuccess=function(){res(q.result)};q.onerror=function(){rej(q.error)}}catch(e){rej(e)}})}
   function idbOp(mode,fn){return idb().then(function(db){return new Promise(function(res,rej){var tx=db.transaction("k",mode),st=tx.objectStore("k"),r=fn(st);tx.oncomplete=function(){res(r&&r.result)};tx.onerror=tx.onabort=function(){rej(tx.error)}})})}
   function saveKey(key){return idbOp("readwrite",function(s){return s.put({key:key,t:Date.now()},"k")}).catch(function(){})}
   function loadKey(){return idbOp("readonly",function(s){return s.get("k")}).then(function(v){return v&&v.key&&Date.now()-v.t<DAYS*864e5?v.key:null}).catch(function(){return null})}
   function dropKey(){return idbOp("readwrite",function(s){return s["delete"]("k")}).catch(function(){})}
-  function derive(pass){return crypto.subtle.importKey("raw",enc.encode(pass),"PBKDF2",false,["deriveKey"]).then(function(bk){return crypto.subtle.deriveKey({name:"PBKDF2",salt:SALT,iterations:ITER,hash:"SHA-256"},bk,{name:"AES-GCM",length:256},false,["decrypt"])})}
+  /* ---- 解壓與解密 ---- */
   function loadPako(){return window.pako?Promise.resolve(window.pako):new Promise(function(res,rej){var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako_inflate.min.js";s.onload=function(){res(window.pako)};s.onerror=function(){rej({net:1})};document.head.appendChild(s)})}
   function gunzip(u8){if(window.DecompressionStream){var ds=new DecompressionStream("gzip"),w=ds.writable.getWriter();w.write(u8);w.close();return new Response(ds.readable).arrayBuffer().then(function(b){return new Uint8Array(b)})}
     return loadPako().then(function(P){return P.ungzip(u8)})}
   function decBuf(key,buf){var u=new Uint8Array(buf);return crypto.subtle.decrypt({name:"AES-GCM",iv:u.slice(0,12)},key,u.slice(12)).then(function(b){return gunzip(new Uint8Array(b))})}
   window.__xz={key:null,dec:function(buf){return decBuf(window.__xz.key,buf).then(function(b){return JSON.parse(dec.decode(b))})},
     lock:function(){try{localStorage.removeItem("xz-unlock")}catch(e){}return dropKey()}};
-  /* ---- 解密並啟動主程式 ---- */
+  /* ---- 密碼 → 逐一嘗試鑰匙槽，解開主金鑰 ---- */
+  function slotsFetch(){return fetch("slots.json?b=20261013-9",{cache:"no-store"}).then(function(r){if(!r.ok)throw{net:1};return r.json()},function(){throw{net:1}})}
+  function tryPass(pass,slots){var i=0;
+    return crypto.subtle.importKey("raw",enc.encode(pass),"PBKDF2",false,["deriveKey"]).then(function(bk){
+      function next(){if(i>=slots.length)return Promise.resolve(null);var s=slots[i++];
+        return crypto.subtle.deriveKey({name:"PBKDF2",salt:h2u(s.s),iterations:ITER,hash:"SHA-256"},bk,{name:"AES-GCM",length:256},false,["decrypt"])
+          .then(function(kek){return crypto.subtle.decrypt({name:"AES-GCM",iv:h2u(s.i)},kek,h2u(s.w))})
+          .then(function(raw){return crypto.subtle.importKey("raw",raw,"AES-GCM",false,["decrypt"])},function(){return next()})}
+      return next()})}
+  /* ---- 取得並解密主程式 ---- */
+  function open(key){return fetch("app.enc?b=20261013-9").then(function(r){if(!r.ok)throw{net:1};return r.arrayBuffer()},function(){throw{net:1}}).then(function(b){return decBuf(key,b)}).then(function(js){
+    window.__xz.key=key;window.__xz.__js=dec.decode(js);return true})}
   function run(){var go=function(){var s=document.createElement("script");s.text=window.__xz.__js;document.body.appendChild(s)};
     if(window.HanziWriter||document.readyState==="complete")go();else window.addEventListener("load",go)}
-  function open(key){return fetch("app.enc?b=20261013-6").then(function(r){if(!r.ok)throw{net:1};return r.arrayBuffer()},function(){throw{net:1}}).then(function(b){return decBuf(key,b)}).then(function(js){
-    window.__xz.key=key;window.__xz.__js=dec.decode(js);return true})}
   function start(){gate.remove();run();window.dispatchEvent(new Event("resize"))}
   /* ---- 錯誤次數鎖定（僅存在本機瀏覽器）---- */
   function ld(){try{return JSON.parse(localStorage.getItem(FKEY))||{n:0,until:0}}catch(e){return{n:0,until:0}}}
@@ -81,13 +91,16 @@ var BUILD="20261013-6";
   if(!have){err.textContent="這個瀏覽器無法驗證密碼，請改用 https 網址開啟";return}
   var forced=/[?&]lock\b/.test(location.search);
   (forced?dropKey().then(function(){return null}):loadKey()).then(function(k){
-    if(!k)return;open(k).then(start,function(){dropKey()})});
+    if(!k)return;open(k).then(start,function(e){if(!(e&&e.net))dropKey()})});
   startLock();
   form.addEventListener("submit",function(e){
     e.preventDefault();if(ld().until>Date.now()){startLock();return}
-    var pass=pw.value.trim();if(!pass)return;
+    var pass=norm(pw.value);if(!pass)return;
     btn.disabled=true;pw.disabled=true;err.textContent="驗證中…";
-    derive(pass).then(function(key){return open(key).then(function(){sv({n:0,until:0});return saveKey(key)}).then(start)}).catch(function(e){
+    slotsFetch().then(function(slots){return tryPass(pass,slots)}).then(function(key){
+      if(!key)throw{bad:1};
+      return open(key).then(function(){sv({n:0,until:0});return saveKey(key)}).then(start)
+    }).catch(function(e){
       if(e&&e.net){pw.disabled=false;btn.disabled=false;err.textContent="網路連線失敗，請檢查網路後再試";return}
       var f=ld();f.n=(f.n||0)+1;pw.value="";pw.disabled=false;btn.disabled=false;
       if(f.n>=MAXF){f={n:0,until:Date.now()+LOCKMIN*60000};sv(f);startLock();return}
@@ -385,7 +398,7 @@ select.ver option{color:#1f2a37;background:#fff}
     <div class="row2"><button id="clrBtn">清除練習紀錄</button><button id="lockBtn">鎖定頁面</button><button class="danger" id="clrYes" hidden>確定清除</button></div>
   </section>
 
-  <p class="note">筆順依教育部「常用國字標準字體筆順學習網」資料（教育部版權，僅供個人學習），少數字缺資料時改用通用筆順並會提示。讀音錄音來自 audio-cmn 專案（Chen Wang 錄製，CC BY-SA）。生字和紀錄只存在這支手機的瀏覽器裡。 <a href="credits.html" target="_blank" rel="noopener" style="color:var(--leaf);font-weight:600">版權與來源</a> <span style="opacity:.7">版本 20261013-6</span></p>
+  <p class="note">筆順依教育部「常用國字標準字體筆順學習網」資料（教育部版權，僅供個人學習），少數字缺資料時改用通用筆順並會提示。讀音錄音來自 audio-cmn 專案（Chen Wang 錄製，CC BY-SA）。生字和紀錄只存在這支手機的瀏覽器裡。 <a href="credits.html" target="_blank" rel="noopener" style="color:var(--leaf);font-weight:600">版權與來源</a> <span style="opacity:.7">版本 20261013-9</span></p>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.7.2/dist/hanzi-writer.min.js"></script>
