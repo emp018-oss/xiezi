@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2f7d5b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>[hidden]{display:none!important}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
+<title>國小寫字簿</title>
+<script>
+/* 自動更新：頁面載入後檢查 version.json，若有新版就換成帶版本參數的網址重新載入（避開瀏覽器快取） */
+var BUILD="20261013-6";
+(function(){try{
+  fetch("version.json?t="+Date.now(),{cache:"no-store"}).then(function(r){return r.ok?r.json():null}).then(function(j){
+    if(!j||!j.v||j.v===BUILD)return;
+    var k="xz-reload",last=sessionStorage.getItem(k);if(last===j.v)return;
+    sessionStorage.setItem(k,j.v);
+    var u=new URL(location.href);u.searchParams.set("v",j.v);location.replace(u.toString());
+  }).catch(function(){});
+}catch(e){}})();
+</script>
+<div id="gate" role="dialog" aria-modal="true" aria-label="輸入密碼">
+  <form id="gateForm" autocomplete="off">
+    <h2>國小寫字簿</h2>
+    <label for="gatePw" class="hint">請輸入密碼</label>
+    <input id="gatePw" type="password" inputmode="numeric" autocomplete="current-password" autofocus>
+    <div class="hint">密碼提示：梧棲</div>
+    <div class="err" id="gateErr" aria-live="polite"></div>
+    <button type="submit">進入</button>
+    <aside class="notice" aria-label="使用聲明">
+      <div class="nhead"><span class="badge">非營利</span><b>使用聲明</b></div>
+      <ul>
+        <li>本網站為<b>個人非營利</b>的學習練習用途，不收費、無廣告，<b>禁止作為商業用途</b>。</li>
+        <li>課本內容的著作權屬各出版社（康軒、翰林、南一）所有，本站僅整理生字供練習，<b>一切以課本為準</b>；本站<b>非官方</b>，與各出版社無關。</li>
+        <li>筆順資料出自教育部「常用國字標準字體筆順學習網」，版權屬教育部；生字詞彙取自教育部教育百科；讀音錄音來自 audio-cmn（CC&nbsp;BY-SA）；筆順動畫使用 Hanzi&nbsp;Writer（MIT）。</li>
+        <li>請勿將密碼轉給他人，亦請勿轉載、散布本站內容。</li>
+      </ul>
+      <a class="more" href="credits.html" target="_blank" rel="noopener">完整來源、作者與授權 →</a>
+    </aside>
+  </form>
+</div>
+<script>
+(function(){
+  var SALT=new Uint8Array("66a547e4d6c92b25a76f48b8784cfbbc".match(/../g).map(function(h){return parseInt(h,16)})),ITER=600000,DAYS=30;
+  var MAXF=5,LOCKMIN=10,FKEY="xz-fails";
+  var gate=document.getElementById("gate"),form=document.getElementById("gateForm"),pw=document.getElementById("gatePw"),err=document.getElementById("gateErr"),btn=form.querySelector("button"),timer=null;
+  var enc=new TextEncoder(),dec=new TextDecoder(),have=!!(window.crypto&&crypto.subtle);
+  /* ---- 金鑰記住（IndexedDB，非可匯出的 CryptoKey），30 天 ---- */
+  function idb(){return new Promise(function(res,rej){try{var q=indexedDB.open("xz",1);q.onupgradeneeded=function(){q.result.createObjectStore("k")};q.onsuccess=function(){res(q.result)};q.onerror=function(){rej(q.error)}}catch(e){rej(e)}})}
+  function idbOp(mode,fn){return idb().then(function(db){return new Promise(function(res,rej){var tx=db.transaction("k",mode),st=tx.objectStore("k"),r=fn(st);tx.oncomplete=function(){res(r&&r.result)};tx.onerror=tx.onabort=function(){rej(tx.error)}})})}
+  function saveKey(key){return idbOp("readwrite",function(s){return s.put({key:key,t:Date.now()},"k")}).catch(function(){})}
+  function loadKey(){return idbOp("readonly",function(s){return s.get("k")}).then(function(v){return v&&v.key&&Date.now()-v.t<DAYS*864e5?v.key:null}).catch(function(){return null})}
+  function dropKey(){return idbOp("readwrite",function(s){return s["delete"]("k")}).catch(function(){})}
+  function derive(pass){return crypto.subtle.importKey("raw",enc.encode(pass),"PBKDF2",false,["deriveKey"]).then(function(bk){return crypto.subtle.deriveKey({name:"PBKDF2",salt:SALT,iterations:ITER,hash:"SHA-256"},bk,{name:"AES-GCM",length:256},false,["decrypt"])})}
+  function loadPako(){return window.pako?Promise.resolve(window.pako):new Promise(function(res,rej){var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako_inflate.min.js";s.onload=function(){res(window.pako)};s.onerror=function(){rej({net:1})};document.head.appendChild(s)})}
+  function gunzip(u8){if(window.DecompressionStream){var ds=new DecompressionStream("gzip"),w=ds.writable.getWriter();w.write(u8);w.close();return new Response(ds.readable).arrayBuffer().then(function(b){return new Uint8Array(b)})}
+    return loadPako().then(function(P){return P.ungzip(u8)})}
+  function decBuf(key,buf){var u=new Uint8Array(buf);return crypto.subtle.decrypt({name:"AES-GCM",iv:u.slice(0,12)},key,u.slice(12)).then(function(b){return gunzip(new Uint8Array(b))})}
+  window.__xz={key:null,dec:function(buf){return decBuf(window.__xz.key,buf).then(function(b){return JSON.parse(dec.decode(b))})},
+    lock:function(){try{localStorage.removeItem("xz-unlock")}catch(e){}return dropKey()}};
+  /* ---- 解密並啟動主程式 ---- */
+  function run(){var go=function(){var s=document.createElement("script");s.text=window.__xz.__js;document.body.appendChild(s)};
+    if(window.HanziWriter||document.readyState==="complete")go();else window.addEventListener("load",go)}
+  function open(key){return fetch("app.enc?b=20261013-6").then(function(r){if(!r.ok)throw{net:1};return r.arrayBuffer()},function(){throw{net:1}}).then(function(b){return decBuf(key,b)}).then(function(js){
+    window.__xz.key=key;window.__xz.__js=dec.decode(js);return true})}
+  function start(){gate.remove();run();window.dispatchEvent(new Event("resize"))}
+  /* ---- 錯誤次數鎖定（僅存在本機瀏覽器）---- */
+  function ld(){try{return JSON.parse(localStorage.getItem(FKEY))||{n:0,until:0}}catch(e){return{n:0,until:0}}}
+  function sv(o){try{localStorage.setItem(FKEY,JSON.stringify(o))}catch(e){}}
+  function tick(){var f=ld(),left=f.until-Date.now();
+    if(left<=0){clearInterval(timer);timer=null;pw.disabled=false;btn.disabled=false;if(f.until){sv({n:0,until:0});err.textContent=""}return false}
+    var m=Math.floor(left/60000),sec=Math.ceil((left%60000)/1000);if(sec===60){m++;sec=0}
+    err.textContent="密碼錯誤 "+MAXF+" 次，暫停輸入，剩 "+m+" 分 "+(sec<10?"0":"")+sec+" 秒";pw.disabled=true;btn.disabled=true;return true}
+  function startLock(){if(tick()&&!timer)timer=setInterval(tick,1000)}
+  if(/[?&]lock\b/.test(location.search)){try{localStorage.removeItem("xz-unlock")}catch(e){}}
+  if(!have){err.textContent="這個瀏覽器無法驗證密碼，請改用 https 網址開啟";return}
+  var forced=/[?&]lock\b/.test(location.search);
+  (forced?dropKey().then(function(){return null}):loadKey()).then(function(k){
+    if(!k)return;open(k).then(start,function(){dropKey()})});
+  startLock();
+  form.addEventListener("submit",function(e){
+    e.preventDefault();if(ld().until>Date.now()){startLock();return}
+    var pass=pw.value.trim();if(!pass)return;
+    btn.disabled=true;pw.disabled=true;err.textContent="驗證中…";
+    derive(pass).then(function(key){return open(key).then(function(){sv({n:0,until:0});return saveKey(key)}).then(start)}).catch(function(e){
+      if(e&&e.net){pw.disabled=false;btn.disabled=false;err.textContent="網路連線失敗，請檢查網路後再試";return}
+      var f=ld();f.n=(f.n||0)+1;pw.value="";pw.disabled=false;btn.disabled=false;
+      if(f.n>=MAXF){f={n:0,until:Date.now()+LOCKMIN*60000};sv(f);startLock();return}
+      sv(f);err.textContent="密碼不對，還可以再試 "+(MAXF-f.n)+" 次";pw.focus()});
+  });
+  setTimeout(function(){try{pw.focus()}catch(e){}},50);
+})();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;600&display=swap">
+<style>
+/* Layout: one-column 習字簿 — 冊次切換、課次選單、生字格、田字格練習板 */
+:root{
+  --paper:#f3f6f1;--sheet:#ffffff;--ink:#1f2a37;--muted:#5c6b63;
+  --grid:#d9483b;--grid-soft:#efb9b2;--leaf:#2f7d5b;--leaf-soft:#dcefe5;
+  --star:#e8a317;--line:#dfe5df;--warn-bg:#fff4dc;--warn:#8a5a00;
+  --f-hand:"LXGW WenKai TC","Kaiti TC","BiauKai","DFKai-SB",serif;
+  --f-ui:"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#141a18;--sheet:#1d2522;--ink:#eef2ee;--muted:#9fb0a7;--grid:#f0705f;--grid-soft:#6a3530;
+  --leaf:#6cc79c;--leaf-soft:#22382e;--star:#f2bd45;--line:#2c3732;--warn-bg:#3a2f16;--warn:#f2c46b;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#141a18;--sheet:#1d2522;--ink:#eef2ee;--muted:#9fb0a7;--grid:#f0705f;--grid-soft:#6a3530;
+  --leaf:#6cc79c;--leaf-soft:#22382e;--star:#f2bd45;--line:#2c3732;--warn-bg:#3a2f16;--warn:#f2c46b;color-scheme:dark}
+body{background:var(--paper);color:var(--ink);font-family:var(--f-ui);font-size:15px;padding-inline:16px;padding-block:10px 14px}
+*{box-sizing:border-box}
+body>.wrap{max-width:900px!important}
+#practice>.wrap{max-width:none;width:100%}
+.stageWrap{display:flex;justify-content:center;min-width:0}
+button,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--leaf);outline-offset:2px}
+.wrap{max-width:440px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+h1{font-family:var(--f-hand);font-size:1.6rem;margin:0;font-weight:700;letter-spacing:.04em}
+.ver{font-size:.75rem;color:var(--sheet);background:var(--leaf);border-radius:6px;padding:1px 6px;vertical-align:middle;margin-left:4px;font-family:var(--f-ui);font-weight:600}
+.total{font-size:.9rem;color:var(--muted);white-space:nowrap}
+.total b{color:var(--star);font-size:1.05rem}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--line);border-radius:12px;padding:3px;gap:3px}
+.seg button{border:0;background:transparent;border-radius:9px;padding:8px;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--sheet);color:var(--ink)}
+.lessonRow{display:flex;gap:8px;align-items:center}
+.lessonRow select{flex:1;min-width:0;border:1.5px solid var(--line);background:var(--sheet);border-radius:12px;padding:10px 12px;font-weight:600}
+.lessonRow button{flex:0 0 auto;border:1.5px solid var(--line);background:var(--sheet);border-radius:12px;padding:10px 12px;font-size:.85rem}
+.unitName{font-size:.8rem;color:var(--muted);margin:-4px 2px 0}
+.chars{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:6px}
+.ch{aspect-ratio:1;max-width:100%;border:1.5px solid var(--line);background:var(--sheet);border-radius:10px;font-family:var(--f-hand);font-size:1.45rem;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05;padding:0}
+.ch small{font-family:var(--f-ui);font-size:.55rem;color:var(--star);letter-spacing:-1px;min-height:.8em}
+.ch[aria-current="true"]{border-color:var(--grid);box-shadow:0 0 0 2px var(--grid-soft)}
+.banner{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:8px 12px;font-size:.8rem;line-height:1.5}
+.editor{background:var(--sheet);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.editor h2{font-size:1rem;margin:0}
+.editor p{margin:0;font-size:.82rem;color:var(--muted);line-height:1.6}
+.editor textarea{width:100%;min-height:4.5em;border:1.5px solid var(--line);border-radius:10px;padding:10px;background:var(--paper);font-family:var(--f-hand);font-size:1.3rem;resize:vertical}
+.editor .bulk{min-height:9em;font-family:var(--f-ui);font-size:.9rem}
+.row2{display:flex;gap:8px;flex-wrap:wrap}
+.row2 button{flex:1;border:0;border-radius:12px;padding:11px;font-weight:600;background:var(--line)}
+.row2 .primary{background:var(--leaf);color:var(--sheet)}
+.msg{font-size:.82rem;min-height:1.2em}
+.msg.oops{color:var(--grid)} .msg.good{color:var(--leaf)}
+.empty{background:var(--sheet);border:1.5px dashed var(--line);border-radius:16px;padding:22px 16px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center}
+.empty b{font-family:var(--f-hand);font-size:1.3rem}
+.empty p{margin:0;font-size:.85rem;color:var(--muted);line-height:1.6}
+.empty button{border:0;border-radius:12px;padding:11px 18px;font-weight:600;background:var(--leaf);color:var(--sheet)}
+.board{background:var(--sheet);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:12px;border:1px solid var(--line)}
+.info{display:flex;gap:12px;align-items:center}
+.zy{font-size:1.25rem;letter-spacing:.06em;font-weight:600;color:var(--leaf);line-height:1.3}
+.zy i{font-style:normal;font-size:.78rem;color:var(--muted);font-weight:400;letter-spacing:0}
+.meta{display:flex;flex-direction:column;gap:4px;min-width:0}
+.meta .row{font-size:.82rem;color:var(--muted)}
+.meta .row b{color:var(--ink);font-weight:600}
+.words{display:flex;flex-wrap:wrap;gap:6px}
+.word{border:0;background:var(--leaf-soft);border-radius:8px;padding:2px 10px;font-family:var(--f-hand);font-size:1.1rem}
+.say{margin-left:auto;flex:0 0 auto;border:0;background:var(--leaf);color:var(--sheet);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.72rem;font-weight:600}
+.say.on{background:var(--grid)}
+.stage{position:relative;flex:0 0 auto;width:100%;max-width:100%;aspect-ratio:1;border:2.5px solid var(--grid);background:var(--sheet)}
+.stage svg.grid{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#writer{position:absolute;inset:0;touch-action:none}
+.status{text-align:center;min-height:1.6em;font-size:1rem;font-weight:600}
+.status.good{color:var(--leaf)} .status.oops{color:var(--grid)}
+.stars{text-align:center;font-size:1.7rem;color:var(--star);letter-spacing:.15em;min-height:1.2em;line-height:1}
+.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.mode{border:1.5px solid var(--line);background:var(--sheet);border-radius:12px;padding:10px 4px;display:flex;flex-direction:column;align-items:center;gap:2px;font-weight:600}
+.mode span{font-size:.7rem;font-weight:400;color:var(--muted)}
+.mode[aria-pressed="true"]{background:var(--leaf-soft);border-color:var(--leaf)}
+.actions{display:flex;gap:8px}
+.actions button{flex:1;border:0;border-radius:12px;padding:12px;font-weight:600}
+.again{background:var(--line)}
+.next{background:var(--grid);color:#fff}
+.note{font-size:.75rem;color:var(--muted);line-height:1.6;margin:0}
+.hd-r{display:flex;align-items:center;gap:8px}
+.fs{display:flex;align-items:center;gap:4px;border:1.5px solid var(--line);background:var(--sheet);border-radius:999px;padding:5px 10px;font-size:.8rem;font-weight:600}
+.fs[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+#handBtn{display:none}
+@media (orientation:landscape) and (min-width:560px){#handBtn{display:flex}}
+body.focus .seg,body.focus .lessonRow,body.focus .unitName,body.focus .note,body.focus .banner,body.focus h1 .ver{display:none!important}
+body.focus h1{font-size:1.2rem}
+body.focus .board{padding:6px;gap:6px;border:0;background:transparent}
+body.focus .mode span{display:none}
+body.focus .mode{padding:8px 4px}
+body.focus .actions button{padding:9px}
+body.focus .stars{font-size:1.3rem;min-height:0}
+body.focus .status{font-size:.9rem}
+body.focus .say{padding:6px 10px}
+@media (orientation:landscape) and (min-width:560px){
+  body{padding-block:6px 8px}
+  body>.wrap,#practice>.wrap{gap:8px}
+  .board{display:grid;grid-template-columns:minmax(200px,1fr) auto;column-gap:16px;row-gap:10px;align-items:start;align-content:start;padding:10px}
+  .board>.stageWrap{grid-column:2;grid-row:1/span 6}
+  .board>:not(.stageWrap){grid-column:1}
+  body.lefty .board{grid-template-columns:auto minmax(200px,1fr)}
+  body.lefty .board>.stageWrap{grid-column:1}
+  body.lefty .board>:not(.stageWrap){grid-column:2}
+  .board>.status,.board>.stars{text-align:left}
+  .chars{grid-template-columns:repeat(auto-fill,minmax(40px,1fr))}
+  .ch{aspect-ratio:auto;height:42px}
+  body.focus .chars,body.focus .total{display:none}
+}
+.linkbtn{border:0;background:none;padding:0;color:var(--leaf);font-weight:600;font-size:.82rem;text-decoration:underline}
+.pick{display:flex;gap:8px;align-items:stretch}
+.pick select{flex:0 0 auto;border:1.5px solid var(--line);background:var(--sheet);border-radius:12px;padding:8px 10px;font-weight:600}
+.pick .seg{flex:1;min-width:0}
+body.focus .pick,body.focus #parentBtn{display:none!important}
+.hd-r{flex-wrap:wrap;justify-content:flex-end}
+.parent{background:var(--sheet);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.pHead{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.parent h2{font-size:1.15rem;margin:0}
+.parent h3{font-size:.92rem;margin:8px 0 0;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.kpis div{background:var(--paper);border-radius:12px;padding:8px 6px;display:flex;flex-direction:column;align-items:center;gap:0}
+.kpis span{font-size:.72rem;color:var(--muted)}
+.kpis b{font-size:1.5rem;font-variant-numeric:tabular-nums;line-height:1.2}
+.kpis small{font-size:.7rem;color:var(--muted)}
+.tblWrap{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse;font-size:.85rem}
+.tbl th{text-align:left;font-weight:600;color:var(--muted);font-size:.75rem;padding:4px 6px;border-bottom:1px solid var(--line)}
+.tbl td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl td:first-child{min-width:9em}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tbl td:nth-child(2){white-space:nowrap;font-variant-numeric:tabular-nums}
+.bar{display:inline-block;width:56px;height:6px;border-radius:3px;background:var(--line);vertical-align:middle;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--leaf)}
+.dim{color:var(--muted);font-size:.8rem}
+.mist{display:flex;flex-wrap:wrap;gap:6px}
+.mchip{display:inline-flex;align-items:center;gap:6px;background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:4px 10px;font-size:.78rem}
+.mchip b{font-family:var(--f-hand);font-size:1.3rem;color:var(--ink);font-weight:400}
+.mchip.done{background:var(--leaf-soft);color:var(--leaf)}
+.pNote{margin:0;font-size:.8rem;color:var(--muted);line-height:1.6}
+.wide{border:0;border-radius:12px;padding:11px;font-weight:600;background:var(--leaf);color:var(--sheet)}
+.danger{background:var(--grid)!important;color:#fff!important}
+header{flex-wrap:nowrap;align-items:center}
+h1{font-size:1.35rem;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ver{white-space:nowrap}
+.hd-r{flex-wrap:nowrap;gap:6px;flex:0 0 auto}
+.fs{padding:5px 9px;white-space:nowrap}
+@media (max-width:380px){#fsLabel{display:none}h1{font-size:1.2rem}}
+.pick{flex-wrap:wrap}.pick .seg{flex:1 1 150px}
+select.ver{border:0;appearance:auto;font:inherit;font-size:.75rem;font-weight:600;color:var(--sheet);background:var(--leaf);border-radius:6px;padding:1px 4px;margin-left:4px;cursor:pointer;vertical-align:middle}
+select.ver option{color:#1f2a37;background:#fff}
+#gate{position:fixed;inset:0;z-index:9999;background:var(--paper);display:flex;align-items:center;justify-content:center;padding:16px}
+#gate{overflow:auto;-webkit-overflow-scrolling:touch}
+#gate form{background:var(--sheet);border:1px solid var(--line);border-radius:18px;padding:24px 20px 18px;width:100%;max-width:380px;margin:auto;display:flex;flex-direction:column;gap:12px;text-align:center;box-shadow:0 8px 28px rgba(31,42,55,.10)}
+#gate .notice{margin-top:6px;text-align:left;background:var(--leaf-soft);border:1px solid var(--line);border-left:4px solid var(--leaf);border-radius:12px;padding:11px 13px 9px;font-size:.78rem;line-height:1.65;color:var(--ink)}
+#gate .nhead{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:.88rem}
+#gate .badge{background:var(--leaf);color:var(--sheet);border-radius:999px;padding:1px 10px;font-size:.74rem;font-weight:600;letter-spacing:.08em}
+#gate .notice ul{margin:0;padding-left:1.15em}
+#gate .notice li{margin:3px 0;color:var(--muted)}
+#gate .notice li b{color:var(--ink);font-weight:600}
+#gate .notice .more{display:inline-block;margin-top:4px;color:var(--leaf);font-weight:600;font-size:.8rem}
+#gate h2{font-family:var(--f-hand);font-size:1.5rem;margin:0}
+#gate input{font:inherit;font-size:1.1rem;text-align:center;border:1.5px solid var(--line);border-radius:12px;padding:11px;background:var(--paper);color:var(--ink);letter-spacing:.15em}
+#gate button{border:0;border-radius:12px;padding:12px;font-weight:600;font-size:1rem;background:var(--leaf);color:var(--sheet)}
+#gate .hint{font-size:.85rem;color:var(--muted)}
+#gate .err{min-height:1.2em;font-size:.85rem;color:var(--grid)}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><span id="gTitle">二年級</span>寫字簿</h1>
+    <div class="hd-r">
+      <div class="total">★ <b id="total">0</b></div>
+      <button class="fs" id="handBtn" aria-pressed="false" aria-label="切換左手模式">左手</button>
+      <button class="fs" id="lockTop" aria-label="登出並鎖定">登出</button>
+      <button class="fs" id="parentBtn" aria-pressed="false">家長</button>
+      <button class="fs" id="fsBtn" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg><span id="fsLabel">全螢幕</span></button>
+    </div>
+  </header>
+
+  <div class="pick">
+    <label for="grade" hidden>年級</label>
+    <select id="grade"></select>
+    <label for="ver" hidden>課本版本</label>
+    <select id="ver"><option value="康軒">康軒版</option><option value="翰林">翰林版</option><option value="南一">南一版</option></select>
+    <div class="seg" role="group" aria-label="學期">
+      <button id="t-up" data-t="上" aria-pressed="true">上學期</button>
+      <button id="t-down" data-t="下" aria-pressed="false">下學期</button>
+    </div>
+  </div>
+  <div class="lessonRow">
+    <label for="lesson" hidden>課次</label>
+    <select id="lesson"></select>
+    <button id="editBtn">輸入生字</button>
+  </div>
+  <div class="unitName" id="unitName"></div>
+
+  <div id="practice">
+    <div class="wrap">
+      <div class="banner" id="banner" hidden></div>
+      <div class="chars" id="chars" role="group" aria-label="生字"></div>
+      <section class="board">
+        <div class="info">
+          <div class="meta">
+            <div class="zy" id="zy"></div>
+            <div class="row">部首 <b id="rad"></b>　筆畫 <b id="cnt"></b></div>
+            <div class="words" id="words"></div>
+          </div>
+          <button class="say" id="say" aria-label="聽讀音"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg><span>聽讀音</span></button>
+        </div>
+        <div class="stageWrap"><div class="stage">
+          <svg class="grid" viewBox="0 0 100 100" aria-hidden="true">
+            <line x1="50" y1="0" x2="50" y2="100" stroke="var(--grid-soft)" stroke-width=".7" stroke-dasharray="3 2"/>
+            <line x1="0" y1="50" x2="100" y2="50" stroke="var(--grid-soft)" stroke-width=".7" stroke-dasharray="3 2"/>
+          </svg>
+          <div id="writer"></div>
+        </div></div>
+        <div class="status" id="status" aria-live="polite"></div>
+        <div class="stars" id="stars" aria-live="polite"></div>
+        <div class="modes" role="group" aria-label="練習方式">
+          <button class="mode" id="m-watch" data-mode="watch">① 看筆順<span>看示範動畫</span></button>
+          <button class="mode" id="m-trace" data-mode="trace">② 描寫<span>照淡色字描</span></button>
+          <button class="mode" id="m-free" data-mode="free">③ 自己寫<span>寫完得星星</span></button>
+        </div>
+        <div class="actions">
+          <button class="again" id="again">再寫一次</button>
+          <button class="next" id="next">下一個字 →</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="empty" id="empty" hidden>
+    <b id="emptyTitle"></b>
+    <p id="emptyText">這課的生字還沒加入。照課本或習作後面的生字表，把這課要寫的字輸入進來就能開始練習。</p>
+    <button id="emptyBtn">輸入這課生字</button>
+  </div>
+
+  <section class="editor" id="editor" hidden>
+    <h2 id="edTitle">輸入生字</h2>
+    <p>直接打字或貼上這課的生字，不用空格。</p>
+    <textarea id="edText" placeholder="例如：年希望坐位本"></textarea>
+    <div class="msg" id="edMsg" aria-live="polite"></div>
+    <div class="row2">
+      <button id="edCancel">取消</button>
+      <button class="primary" id="edSave">儲存並練習</button>
+    </div>
+    <p>想一次輸入整冊？<button class="linkbtn" id="bulkToggle">貼上整冊生字</button></p>
+    <div id="bulkBox" hidden>
+      <p>每課一行，開頭寫課次，例如「第1課 年希望坐位」或「4 運動跑跳」。課名可留著，會自動略過。</p>
+      <textarea class="bulk" id="bulkText" placeholder="第1課 年希望坐位本淡…&#10;第2課 …"></textarea>
+      <div class="msg" id="bulkMsg" aria-live="polite"></div>
+      <div class="row2"><button class="primary" id="bulkSave">匯入整冊</button></div>
+    </div>
+  </section>
+
+  <section class="parent" id="parent" hidden>
+    <div class="pHead"><h2>家長頁面</h2><button class="fs" id="parentClose">回到練習</button></div>
+    <div class="kpis">
+      <div><span>今天寫了</span><b id="kToday">0</b><small>次</small></div>
+      <div><span>近 7 天</span><b id="kWeek">0</b><small>次</small></div>
+      <div><span>星星</span><b id="kStars">0</b><small>顆</small></div>
+      <div><span>待複習</span><b id="kReview">0</b><small>字</small></div>
+    </div>
+    <h3 id="pBookTitle">本冊進度</h3>
+    <div class="tblWrap"><table class="tbl">
+      <thead><tr><th>課次</th><th>完成</th><th>星星</th></tr></thead>
+      <tbody id="pRows"></tbody>
+    </table></div>
+    <h3>常寫錯的字</h3>
+    <div class="mist" id="pMist"></div>
+    <button class="primary wide" id="pReview">練習錯字</button>
+    <h3>讀音方式</h3>
+    <div class="seg" role="group" aria-label="讀音方式">
+      <button id="v-auto" data-v="auto">手機語音優先</button>
+      <button id="v-rec" data-v="rec">一律用錄音</button>
+    </div>
+    <p class="pNote" id="voiceNote"></p>
+    <h3>離線練習</h3>
+    <p class="pNote" id="offNote">先下載這一冊用到的筆順和讀音，之後網路不穩也能繼續練。頁面關掉後要重新開啟時仍需要網路。</p>
+    <div class="row2"><button class="primary" id="offBtn">下載本冊資料</button></div>
+    <div class="msg" id="offMsg" aria-live="polite"></div>
+    <h3>清除紀錄</h3>
+    <p class="pNote">只清除星星、錯字和練習次數，輸入的生字會保留。</p>
+    <div class="row2"><button id="clrBtn">清除練習紀錄</button><button id="lockBtn">鎖定頁面</button><button class="danger" id="clrYes" hidden>確定清除</button></div>
+  </section>
+
+  <p class="note">筆順依教育部「常用國字標準字體筆順學習網」資料（教育部版權，僅供個人學習），少數字缺資料時改用通用筆順並會提示。讀音錄音來自 audio-cmn 專案（Chen Wang 錄製，CC BY-SA）。生字和紀錄只存在這支手機的瀏覽器裡。 <a href="credits.html" target="_blank" rel="noopener" style="color:var(--leaf);font-weight:600">版權與來源</a> <span style="opacity:.7">版本 20261013-6</span></p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.7.2/dist/hanzi-writer.min.js"></script>
+<!-- 主程式已加密為 app.enc，登入後才會解密執行 -->
+
+</body>
+</html>
